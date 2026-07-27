@@ -57,6 +57,10 @@ onmessage = async (e) => {
 
   const key = Object.keys(results)[0];
   const raw = results[key].data;
+  if (Math.random() < 0.01) {
+  console.log("Sample raw output:", raw.slice(0, 20));
+}
+
 
   const detections = decodeYOLO(raw);
 
