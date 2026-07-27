@@ -1,189 +1,175 @@
+// -------------------------------
+// CONFIG
+// -------------------------------
+const MIN_CONFIDENCE = 0.60;       // confidence threshold
+const REQUIRED_FRAMES = 3;         // persistence requirement
+const STRIKE_COOLDOWN = 2000;      // strike cooldown
+const FREEZE_MS = 3000;            // freeze frame duration (3 seconds)
+
+let lastStrikeTime = 0;
+let consecutiveBallFrames = 0;
+let freezeActive = false;
+let lastStrikeFrame = null;
+
+// Strike zone sliders (default scale = 1.0)
+let strikeZoneWidthScale = 1.0;
+let strikeZoneHeightScale = 1.0;
+
+// -------------------------------
+// SETUP VIDEO
+// -------------------------------
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const strikeZoneDiv = document.getElementById("strike-zone");
 
-const startBtn = document.getElementById("start-btn");
-const statusEl = document.getElementById("status");
-const ballsEl = document.getElementById("balls-count");
-const strikesEl = document.getElementById("strikes-count");
+async function setupCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" }
+  });
+  video.srcObject = stream;
+  await video.play();
+}
 
-let balls = 0;
-let strikes = 0;
-let session = null;
-let running = false;
+setupCamera();
 
-// Strike zone (normalized 0–1, same idea as Python script)
-const STRIKE_ZONE = {
-  x_min: 0.35,
-  x_max: 0.65,
-  y_min: 0.25,
-  y_max: 0.55
-};
-
-const CLOSE_THRESHOLD = 0.05; // fraction of frame
+// -------------------------------
+// LOAD MODEL
+// -------------------------------
+let session;
 
 async function loadModel() {
-  statusEl.textContent = "Status: loading model...";
-  // Adjust path if you put model in /models
-  session = await ort.InferenceSession.create("best_fp16.onnx");
-  statusEl.textContent = "Status: model loaded";
+  session = await ort.InferenceSession.create("best_fp16.onnx", {
+    executionProviders: ["webgl"]
+  });
 }
 
-async function startCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" }, // back camera on mobile
-      audio: false
-    });
-    video.srcObject = stream;
+loadModel();
 
-    await new Promise((resolve) => {
-      video.onloadedmetadata = () => resolve();
-    });
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    // Position strike zone overlay
-    const w = canvas.width;
-    const h = canvas.height;
-    const sx = STRIKE_ZONE.x_min * w;
-    const sy = STRIKE_ZONE.y_min * h;
-    const sw = (STRIKE_ZONE.x_max - STRIKE_ZONE.x_min) * w;
-    const sh = (STRIKE_ZONE.y_max - STRIKE_ZONE.y_min) * h;
-
-    strikeZoneDiv.style.left = `${sx}px`;
-    strikeZoneDiv.style.top = `${sy}px`;
-    strikeZoneDiv.style.width = `${sw}px`;
-    strikeZoneDiv.style.height = `${sh}px`;
-
-    running = true;
-    statusEl.textContent = "Status: running";
-    loop();
-  } catch (err) {
-    console.error(err);
-    statusEl.textContent = "Status: camera error";
+// -------------------------------
+// AI LOOP (runs every 120ms)
+// -------------------------------
+async function aiLoop() {
+  if (!session || freezeActive) {
+    requestAnimationFrame(aiLoop);
+    return;
   }
-}
 
-function preprocessFrame() {
-  // Resize to model input size (e.g., 640x640) – adjust to your model
-  const inputSize = 640;
+  const now = performance.now();
+
+  // Resize frame for inference
   const tmpCanvas = document.createElement("canvas");
-  tmpCanvas.width = inputSize;
-  tmpCanvas.height = inputSize;
+  tmpCanvas.width = 640;
+  tmpCanvas.height = 640;
   const tmpCtx = tmpCanvas.getContext("2d");
-  tmpCtx.drawImage(video, 0, 0, inputSize, inputSize);
+  tmpCtx.drawImage(video, 0, 0, 640, 640);
 
-  const imageData = tmpCtx.getImageData(0, 0, inputSize, inputSize);
-  const { data } = imageData;
+  const imageData = tmpCtx.getImageData(0, 0, 640, 640);
+  const inputTensor = new ort.Tensor("float32", imageData.data, [1, 640, 640, 4]);
 
-  // Convert to float32, normalize 0–1, shape [1, 3, H, W]
-  const floatData = new Float32Array(3 * inputSize * inputSize);
-  for (let i = 0; i < inputSize * inputSize; i++) {
-    const r = data[i * 4] / 255;
-    const g = data[i * 4 + 1] / 255;
-    const b = data[i * 4 + 2] / 255;
-    floatData[i] = r;
-    floatData[i + inputSize * inputSize] = g;
-    floatData[i + 2 * inputSize * inputSize] = b;
+  const feeds = { images: inputTensor };
+  const results = await session.run(feeds);
+  const detections = results.output.data;
+
+  // -------------------------------
+  // FILTER DETECTIONS
+  // -------------------------------
+  const balls = detections.filter(d => d.confidence > MIN_CONFIDENCE);
+  const hasBall = balls.length > 0;
+
+  // -------------------------------
+  // PERSISTENCE CHECK
+  // -------------------------------
+  if (hasBall) {
+    consecutiveBallFrames++;
+  } else {
+    consecutiveBallFrames = 0;
   }
 
-  const inputTensor = new ort.Tensor("float32", floatData, [1, 3, inputSize, inputSize]);
-  return { inputTensor, inputSize };
-}
+  // -------------------------------
+  // STRIKE LOGIC
+  // -------------------------------
+  if (consecutiveBallFrames >= REQUIRED_FRAMES) {
+    const timeSinceLastStrike = now - lastStrikeTime;
 
-function parseOutputs(outputs, frameWidth, frameHeight) {
-  // This depends on your ONNX export.
-  // For YOLOv8 ONNX, usually there's a single output with shape [1, N, 6] (x1,y1,x2,y2,score,class).
-  const outputName = Object.keys(outputs)[0];
-  const out = outputs[outputName].data;
-  const numDet = outputs[outputName].dims[1];
+    if (timeSinceLastStrike > STRIKE_COOLDOWN) {
+      callStrike();
+      lastStrikeTime = now;
+    }
 
-  const boxes = [];
-  for (let i = 0; i < numDet; i++) {
-    const base = i * 6;
-    const x1 = out[base + 0] * frameWidth;
-    const y1 = out[base + 1] * frameHeight;
-    const x2 = out[base + 2] * frameWidth;
-    const y2 = out[base + 3] * frameHeight;
-    const score = out[base + 4];
-    const cls = out[base + 5];
-
-    if (score < 0.25) continue; // confidence threshold
-    // If you have multiple classes, you can check cls here.
-    boxes.push({ x1, y1, x2, y2, score, cls });
+    consecutiveBallFrames = 0;
   }
-  return boxes;
+
+  requestAnimationFrame(aiLoop);
 }
 
-async function loop() {
-  if (!running || !session) return;
+aiLoop();
 
-  const { inputTensor } = preprocessFrame();
+// -------------------------------
+// STRIKE EVENT + FREEZE FRAME
+// -------------------------------
+function callStrike() {
+  console.log("STRIKE!");
 
-  try {
-    const feeds = { images: inputTensor }; // adjust key name to your model input
-    const outputs = await session.run(feeds);
+  freezeActive = true;
 
-    // Draw original frame
+  // Save freeze frame for replay
+  lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Draw freeze frame
+  ctx.putImageData(lastStrikeFrame, 0, 0);
+
+  setTimeout(() => {
+    freezeActive = false;
+  }, FREEZE_MS);
+}
+
+// -------------------------------
+// REPLAY LAST STRIKE
+// -------------------------------
+function replayStrike() {
+  if (lastStrikeFrame) {
+    freezeActive = true;
+    ctx.putImageData(lastStrikeFrame, 0, 0);
+
+    setTimeout(() => {
+      freezeActive = false;
+    }, FREEZE_MS);
+  }
+}
+
+// Attach replay button
+document.getElementById("replayButton").addEventListener("click", replayStrike);
+
+// -------------------------------
+// STRIKE ZONE SLIDERS
+// -------------------------------
+document.getElementById("zoneWidthSlider").addEventListener("input", (e) => {
+  strikeZoneWidthScale = parseFloat(e.target.value);
+});
+
+document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
+  strikeZoneHeightScale = parseFloat(e.target.value);
+});
+
+// -------------------------------
+// VIDEO DRAW LOOP (always smooth)
+// -------------------------------
+function drawLoop() {
+  if (!freezeActive) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const boxes = parseOutputs(outputs, canvas.width, canvas.height);
+    // Draw strike zone using slider scales
+    const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
+    const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
+    const zoneX = (canvas.width - zoneWidth) / 2;
+    const zoneY = (canvas.height - zoneHeight) / 2;
 
-    boxes.forEach((box) => {
-      const { x1, y1, x2, y2 } = box;
-      const w = canvas.width;
-      const h = canvas.height;
-
-      const cx = (x1 + x2) / 2 / w;
-      const cy = (y1 + y2) / 2 / h;
-      const bw = (x2 - x1) / w;
-      const bh = (y2 - y1) / h;
-
-      const ballIsClose = bw > CLOSE_THRESHOLD || bh > CLOSE_THRESHOLD;
-      const insideStrikeZone =
-        STRIKE_ZONE.x_min <= cx &&
-        cx <= STRIKE_ZONE.x_max &&
-        STRIKE_ZONE.y_min <= cy &&
-        cy <= STRIKE_ZONE.y_max;
-
-      let call, color;
-      if (ballIsClose && insideStrikeZone) {
-        call = "STRIKE";
-        strikes += 1;
-        color = "lime";
-      } else {
-        call = "BALL";
-        balls += 1;
-        color = "red";
-      }
-
-      // Draw box
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-
-      // Label
-      ctx.fillStyle = color;
-      ctx.font = "16px sans-serif";
-      ctx.fillText(call, x1 + 4, y1 - 4);
-    });
-
-    ballsEl.textContent = balls;
-    strikesEl.textContent = strikes;
-  } catch (err) {
-    console.error(err);
-    statusEl.textContent = "Status: inference error";
+    ctx.strokeStyle = "rgba(0,255,0,0.7)";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(zoneX, zoneY, zoneWidth, zoneHeight);
   }
 
-  requestAnimationFrame(loop);
+  requestAnimationFrame(drawLoop);
 }
 
-startBtn.addEventListener("click", async () => {
-  if (!session) {
-    await loadModel();
-  }
-  await startCamera();
-});
+drawLoop();
