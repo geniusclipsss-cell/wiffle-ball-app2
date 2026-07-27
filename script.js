@@ -17,12 +17,16 @@ let lastStrikeFrame = null;
 let strikeZoneWidthScale = 1.0;
 let strikeZoneHeightScale = 1.0;
 
+let latestDetections = [];
+let frameCounter = 0;
+
 // -------------------------------
 // SETUP VIDEO + CANVAS
 // -------------------------------
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const strikeSound = document.getElementById("strikeSound");
 
 function resizeCanvas() {
   canvas.width = window.innerWidth;
@@ -41,7 +45,7 @@ async function setupCamera() {
 setupCamera();
 
 // -------------------------------
-// LOAD MODEL
+// LOAD MODEL + WARM-UP
 // -------------------------------
 let session;
 
@@ -52,6 +56,11 @@ async function loadModel() {
   session = await ort.InferenceSession.create("best_fp16.onnx", {
     executionProviders: ["wasm"]
   });
+
+  // warm-up
+  const dummy = new Float32Array(1 * 3 * MODEL_INPUT_SIZE * MODEL_INPUT_SIZE);
+  const warmTensor = new ort.Tensor("float32", dummy, [1, 3, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
+  await session.run({ images: warmTensor });
 }
 loadModel();
 
@@ -84,8 +93,6 @@ function preprocessFrame() {
 // -------------------------------
 function decodeYOLO(rawData) {
   const numValues = rawData.length;
-
-  // YOLOv8 output is usually [8400 * 84]
   const numDetections = numValues / 84;
 
   const detections = [];
@@ -108,10 +115,17 @@ function decodeYOLO(rawData) {
 }
 
 // -------------------------------
-// AI LOOP
+// AI LOOP (frame skipping, async)
 // -------------------------------
 async function aiLoop() {
   if (!session || freezeActive) {
+    setTimeout(aiLoop, INFERENCE_INTERVAL_MS);
+    return;
+  }
+
+  frameCounter++;
+  // process every 2nd frame to reduce load
+  if (frameCounter % 2 !== 0) {
     setTimeout(aiLoop, INFERENCE_INTERVAL_MS);
     return;
   }
@@ -123,15 +137,12 @@ async function aiLoop() {
 
   const results = await session.run(feeds);
 
-  console.log(results); // keep for debugging
-
   const outputKey = Object.keys(results)[0];
   const rawTensor = results[outputKey];
-
   const rawData = rawTensor.data;
 
-  const detections = decodeYOLO(rawData);
-  const hasBall = detections.length > 0;
+  latestDetections = decodeYOLO(rawData);
+  const hasBall = latestDetections.length > 0;
 
   if (hasBall) {
     consecutiveBallFrames++;
@@ -155,13 +166,19 @@ async function aiLoop() {
 aiLoop();
 
 // -------------------------------
-// STRIKE EVENT
+// STRIKE EVENT (sound + freeze)
 // -------------------------------
 function callStrike() {
   freezeActive = true;
 
   lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
   ctx.putImageData(lastStrikeFrame, 0, 0);
+
+  // play baseball umpire strike call
+  if (strikeSound) {
+    strikeSound.currentTime = 0;
+    strikeSound.play().catch(() => {});
+  }
 
   setTimeout(() => {
     freezeActive = false;
@@ -194,7 +211,7 @@ document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
 });
 
 // -------------------------------
-// DRAW LOOP
+// DRAW LOOP (smooth video + boxes)
 // -------------------------------
 function drawLoop() {
   if (!freezeActive) {
@@ -208,6 +225,25 @@ function drawLoop() {
     ctx.strokeStyle = "rgba(0,255,0,0.7)";
     ctx.lineWidth = 3;
     ctx.strokeRect(zoneX, zoneY, zoneWidth, zoneHeight);
+
+    // draw bounding boxes from latestDetections
+    for (const det of latestDetections) {
+      const { x, y, w, h, confidence } = det;
+
+      // assuming YOLO coords are normalized 0–1
+      const bx = x * canvas.width;
+      const by = y * canvas.height;
+      const bw = w * canvas.width;
+      const bh = h * canvas.height;
+
+      ctx.strokeStyle = "rgba(255,0,0,0.8)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(bx, by, bw, bh);
+
+      ctx.fillStyle = "rgba(255,0,0,0.8)";
+      ctx.font = "16px Arial";
+      ctx.fillText(`Ball ${confidence.toFixed(2)}`, bx, by - 5);
+    }
   }
 
   requestAnimationFrame(drawLoop);
