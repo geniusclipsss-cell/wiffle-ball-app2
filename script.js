@@ -6,6 +6,10 @@ const REQUIRED_FRAMES = 3;
 const STRIKE_COOLDOWN = 2000;
 const FREEZE_MS = 3000;
 
+// performance tuning
+const INFERENCE_INTERVAL_MS = 250; // 4 FPS inference
+const MODEL_INPUT_SIZE = 320;      // 320x320 instead of 640x640
+
 let lastStrikeTime = 0;
 let consecutiveBallFrames = 0;
 let freezeActive = false;
@@ -15,11 +19,18 @@ let strikeZoneWidthScale = 1.0;
 let strikeZoneHeightScale = 1.0;
 
 // -------------------------------
-// SETUP VIDEO
+// SETUP VIDEO + CANVAS
 // -------------------------------
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
 
 async function setupCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -48,35 +59,35 @@ async function loadModel() {
 loadModel();
 
 // -------------------------------
-// IMAGE PREPROCESSING
+// IMAGE PREPROCESSING (320x320)
 // -------------------------------
 function preprocessFrame() {
   const tmpCanvas = document.createElement("canvas");
-  tmpCanvas.width = 640;
-  tmpCanvas.height = 640;
+  tmpCanvas.width = MODEL_INPUT_SIZE;
+  tmpCanvas.height = MODEL_INPUT_SIZE;
   const tmpCtx = tmpCanvas.getContext("2d");
 
-  tmpCtx.drawImage(video, 0, 0, 640, 640);
-  const { data } = tmpCtx.getImageData(0, 0, 640, 640);
+  tmpCtx.drawImage(video, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
+  const { data } = tmpCtx.getImageData(0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
 
-  const floatData = new Float32Array(1 * 3 * 640 * 640);
+  const floatData = new Float32Array(1 * 3 * MODEL_INPUT_SIZE * MODEL_INPUT_SIZE);
   let idx = 0;
 
   for (let i = 0; i < data.length; i += 4) {
-    floatData[idx++] = data[i] / 255;
-    floatData[idx++] = data[i + 1] / 255;
-    floatData[idx++] = data[i + 2] / 255;
+    floatData[idx++] = data[i] / 255;     // R
+    floatData[idx++] = data[i + 1] / 255; // G
+    floatData[idx++] = data[i + 2] / 255; // B
   }
 
-  return new ort.Tensor("float32", floatData, [1, 3, 640, 640]);
+  return new ort.Tensor("float32", floatData, [1, 3, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
 }
 
 // -------------------------------
-// AI LOOP
+// AI LOOP (slower, mobile-friendly)
 // -------------------------------
 async function aiLoop() {
   if (!session || freezeActive) {
-    requestAnimationFrame(aiLoop);
+    setTimeout(aiLoop, INFERENCE_INTERVAL_MS);
     return;
   }
 
@@ -87,10 +98,15 @@ async function aiLoop() {
 
   const results = await session.run(feeds);
 
+  // ⭐ ADDED SAFELY: this will show your model output format
+  console.log(results);
+
   // AUTO-DETECT OUTPUT KEY
   const outputKey = Object.keys(results)[0];
-  const detections = results[outputKey].data;
+  const detectionsTensor = results[outputKey];
 
+  // TEMPORARY: until we see console output
+  const detections = detectionsTensor.data || [];
   const balls = detections.filter(d => d.confidence > MIN_CONFIDENCE);
   const hasBall = balls.length > 0;
 
@@ -111,7 +127,7 @@ async function aiLoop() {
     consecutiveBallFrames = 0;
   }
 
-  requestAnimationFrame(aiLoop);
+  setTimeout(aiLoop, INFERENCE_INTERVAL_MS);
 }
 
 aiLoop();
@@ -158,7 +174,7 @@ document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
 });
 
 // -------------------------------
-// VIDEO DRAW LOOP
+// VIDEO DRAW LOOP (smooth UI)
 // -------------------------------
 function drawLoop() {
   if (!freezeActive) {
