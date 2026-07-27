@@ -13,7 +13,6 @@
       font-family: Arial, sans-serif;
       color: white;
     }
-
     #canvas {
       position: absolute;
       top: 0;
@@ -22,11 +21,7 @@
       height: 100vh;
       object-fit: cover;
     }
-
-    #video {
-      display: none;
-    }
-
+    #video { display: none; }
     #controls {
       position: absolute;
       top: 10px;
@@ -36,17 +31,8 @@
       padding: 10px;
       border-radius: 8px;
     }
-
-    #controls label {
-      display: block;
-      margin-top: 8px;
-      font-size: 14px;
-    }
-
-    #controls input[type="range"] {
-      width: 150px;
-    }
-
+    #controls label { display: block; margin-top: 8px; font-size: 14px; }
+    #controls input[type="range"] { width: 150px; }
     #replayButton {
       margin-bottom: 10px;
       padding: 8px 12px;
@@ -75,11 +61,8 @@
     <input type="range" id="zoneHeightSlider" min="0.5" max="2.0" step="0.05" value="1.0">
   </div>
 
-  <!-- Strike sound (baseball umpire call) -->
   <audio id="strikeSound" src="strike.mp3"></audio>
 
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
   <script src="script.js"></script>
-
 </body>
 </html>
