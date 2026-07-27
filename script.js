@@ -14,7 +14,6 @@ let consecutiveBallFrames = 0;
 let strikeZoneWidthScale = 1.0;
 let strikeZoneHeightScale = 1.0;
 
-// Worker
 const worker = new Worker("worker.js");
 
 worker.onmessage = (e) => {
@@ -36,7 +35,6 @@ worker.onmessage = (e) => {
   }
 };
 
-// Camera
 async function setupCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
@@ -46,7 +44,6 @@ async function setupCamera() {
 }
 setupCamera();
 
-// Resize canvas
 function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -54,7 +51,14 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
-// Preprocess frame for worker
+function getStrikeZone() {
+  const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
+  const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
+  const zoneX = (canvas.width - zoneWidth) / 2;
+  const zoneY = (canvas.height - zoneHeight) / 2;
+  return { zoneX, zoneY, zoneWidth, zoneHeight };
+}
+
 function preprocessFrame() {
   const tmp = document.createElement("canvas");
   tmp.width = MODEL_INPUT_SIZE;
@@ -76,9 +80,9 @@ function preprocessFrame() {
   return out;
 }
 
-// AI loop (worker)
+// AI loop → send frames to worker
 setInterval(() => {
-  if (!freezeActive) {
+  if (!freezeActive && video.readyState >= 2) {
     const frame = preprocessFrame();
     worker.postMessage(frame);
   }
@@ -91,8 +95,10 @@ function callStrike() {
   lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
   ctx.putImageData(lastStrikeFrame, 0, 0);
 
-  strikeSound.currentTime = 0;
-  strikeSound.play().catch(() => {});
+  if (strikeSound) {
+    strikeSound.currentTime = 0;
+    strikeSound.play().catch(() => {});
+  }
 
   setTimeout(() => {
     freezeActive = false;
@@ -104,7 +110,9 @@ document.getElementById("replayButton").addEventListener("click", () => {
   if (lastStrikeFrame) {
     freezeActive = true;
     ctx.putImageData(lastStrikeFrame, 0, 0);
-    setTimeout(() => freezeActive = false, 3000);
+    setTimeout(() => {
+      freezeActive = false;
+    }, 3000);
   }
 });
 
@@ -116,15 +124,12 @@ document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
   strikeZoneHeightScale = parseFloat(e.target.value);
 });
 
-// Draw loop (smooth video)
+// Draw loop
 function drawLoop() {
   if (!freezeActive) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
-    const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
-    const zoneX = (canvas.width - zoneWidth) / 2;
-    const zoneY = (canvas.height - zoneHeight) / 2;
+    const { zoneX, zoneY, zoneWidth, zoneHeight } = getStrikeZone();
 
     ctx.strokeStyle = "rgba(0,255,0,0.7)";
     ctx.lineWidth = 3;
