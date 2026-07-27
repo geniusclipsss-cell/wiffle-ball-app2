@@ -1,10 +1,11 @@
-importScripts("https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js");
+importScripts("ort.min.js");
 
-let session = null;
 const MODEL_INPUT_SIZE = 640;
+let session = null;
 
-// Load model
 async function loadModel() {
+  // Tell ORT to look for WASM files in the same folder
+  ort.env.wasm.wasmPaths = "./";
   ort.env.wasm.numThreads = 1;
   ort.env.wasm.simd = true;
 
@@ -21,7 +22,7 @@ async function loadModel() {
 }
 loadModel();
 
-// YOLO decode
+// YOLO decode (light filters; we can tune later)
 function decodeYOLO(rawData) {
   const numDetections = rawData.length / 84;
   const out = [];
@@ -29,18 +30,21 @@ function decodeYOLO(rawData) {
   for (let i = 0; i < numDetections; i++) {
     const o = i * 84;
 
+    // Assume model outputs pixel coords (0–640); normalize to 0–1
     let x = rawData[o + 0] / MODEL_INPUT_SIZE;
     let y = rawData[o + 1] / MODEL_INPUT_SIZE;
     let w = rawData[o + 2] / MODEL_INPUT_SIZE;
     let h = rawData[o + 3] / MODEL_INPUT_SIZE;
     let conf = rawData[o + 4];
 
-    if (conf < 0.60) continue;
-    if (w > 0.2 || h > 0.2) continue;
-    if (w < 0.02 || h < 0.02) continue;
+    if (conf < 0.50) continue;
+
+    // Basic size filters
+    if (w > 0.5 || h > 0.5) continue;   // ignore huge blobs
+    if (w < 0.01 || h < 0.01) continue; // ignore tiny noise
 
     const ratio = w / h;
-    if (ratio < 0.7 || ratio > 1.3) continue;
+    if (ratio < 0.5 || ratio > 1.8) continue; // allow some blur
 
     out.push({ x, y, w, h, confidence: conf });
   }
@@ -48,7 +52,6 @@ function decodeYOLO(rawData) {
   return out;
 }
 
-// Receive frames from main thread
 onmessage = async (e) => {
   if (!session) return;
 
@@ -57,10 +60,6 @@ onmessage = async (e) => {
 
   const key = Object.keys(results)[0];
   const raw = results[key].data;
-  if (Math.random() < 0.01) {
-  console.log("Sample raw output:", raw.slice(0, 20));
-}
-
 
   const detections = decodeYOLO(raw);
 
