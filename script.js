@@ -89,7 +89,33 @@ function preprocessFrame() {
 }
 
 // -------------------------------
-// YOLOv8 RAW OUTPUT DECODER
+// STRIKE ZONE HELPERS
+// -------------------------------
+function getStrikeZone() {
+  const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
+  const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
+  const zoneX = (canvas.width - zoneWidth) / 2;
+  const zoneY = (canvas.height - zoneHeight) / 2;
+
+  return { zoneX, zoneY, zoneWidth, zoneHeight };
+}
+
+function isInsideStrikeZone(det) {
+  const { zoneX, zoneY, zoneWidth, zoneHeight } = getStrikeZone();
+
+  const bx = det.x * canvas.width;
+  const by = det.y * canvas.height;
+
+  return (
+    bx > zoneX &&
+    bx < zoneX + zoneWidth &&
+    by > zoneY &&
+    by < zoneY + zoneHeight
+  );
+}
+
+// -------------------------------
+// YOLOv8 RAW OUTPUT DECODER (with filters)
 // -------------------------------
 function decodeYOLO(rawData) {
   const numValues = rawData.length;
@@ -106,9 +132,29 @@ function decodeYOLO(rawData) {
     const h = rawData[offset + 3];
     const confidence = rawData[offset + 4];
 
-    if (confidence > MIN_CONFIDENCE) {
-      detections.push({ x, y, w, h, confidence });
-    }
+    // basic confidence filter
+    if (confidence < MIN_CONFIDENCE) continue;
+
+    // ignore huge boxes (face/body etc.)
+    if (w > 0.2 || h > 0.2) continue;
+
+    // ignore tiny noise
+    if (w < 0.02 || h < 0.02) continue;
+
+    // must be roughly round (ball-like)
+    const ratio = w / h;
+    if (ratio < 0.7 || ratio > 1.3) continue;
+
+    // class probability (first class)
+    const classProb = rawData[offset + 5];
+    if (classProb < MIN_CONFIDENCE) continue;
+
+    const det = { x, y, w, h, confidence };
+
+    // must be inside strike zone
+    if (!isInsideStrikeZone(det)) continue;
+
+    detections.push(det);
   }
 
   return detections;
@@ -174,7 +220,6 @@ function callStrike() {
   lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
   ctx.putImageData(lastStrikeFrame, 0, 0);
 
-  // play baseball umpire strike call
   if (strikeSound) {
     strikeSound.currentTime = 0;
     strikeSound.play().catch(() => {});
@@ -217,10 +262,7 @@ function drawLoop() {
   if (!freezeActive) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
-    const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
-    const zoneX = (canvas.width - zoneWidth) / 2;
-    const zoneY = (canvas.height - zoneHeight) / 2;
+    const { zoneX, zoneY, zoneWidth, zoneHeight } = getStrikeZone();
 
     ctx.strokeStyle = "rgba(0,255,0,0.7)";
     ctx.lineWidth = 3;
@@ -230,7 +272,6 @@ function drawLoop() {
     for (const det of latestDetections) {
       const { x, y, w, h, confidence } = det;
 
-      // assuming YOLO coords are normalized 0–1
       const bx = x * canvas.width;
       const by = y * canvas.height;
       const bw = w * canvas.width;
