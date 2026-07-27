@@ -1,17 +1,16 @@
 // -------------------------------
 // CONFIG
 // -------------------------------
-const MIN_CONFIDENCE = 0.60;       // confidence threshold
-const REQUIRED_FRAMES = 3;         // persistence requirement
-const STRIKE_COOLDOWN = 2000;      // strike cooldown
-const FREEZE_MS = 3000;            // freeze frame duration (3 seconds)
+const MIN_CONFIDENCE = 0.60;
+const REQUIRED_FRAMES = 3;
+const STRIKE_COOLDOWN = 2000;
+const FREEZE_MS = 3000;
 
 let lastStrikeTime = 0;
 let consecutiveBallFrames = 0;
 let freezeActive = false;
 let lastStrikeFrame = null;
 
-// Strike zone sliders (default scale = 1.0)
 let strikeZoneWidthScale = 1.0;
 let strikeZoneHeightScale = 1.0;
 
@@ -33,24 +32,48 @@ async function setupCamera() {
 setupCamera();
 
 // -------------------------------
-// LOAD MODEL (WebGL + WASM fallback)
+// LOAD MODEL (WASM ONLY)
 // -------------------------------
 let session;
 
 async function loadModel() {
-  // WASM performance boost
   ort.env.wasm.numThreads = 1;
   ort.env.wasm.simd = true;
 
   session = await ort.InferenceSession.create("best_fp16.onnx", {
-    executionProviders: ["webgl", "wasm"]
+    executionProviders: ["wasm"]
   });
 }
 
 loadModel();
 
 // -------------------------------
-// AI LOOP (runs every 120ms)
+// IMAGE PREPROCESSING (FIXED)
+// -------------------------------
+function preprocessFrame() {
+  const tmpCanvas = document.createElement("canvas");
+  tmpCanvas.width = 640;
+  tmpCanvas.height = 640;
+  const tmpCtx = tmpCanvas.getContext("2d");
+
+  tmpCtx.drawImage(video, 0, 0, 640, 640);
+  const { data } = tmpCtx.getImageData(0, 0, 640, 640);
+
+  // Convert RGBA → normalized RGB float32 → NCHW
+  const floatData = new Float32Array(1 * 3 * 640 * 640);
+  let idx = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    floatData[idx++] = data[i] / 255;     // R
+    floatData[idx++] = data[i + 1] / 255; // G
+    floatData[idx++] = data[i + 2] / 255; // B
+  }
+
+  return new ort.Tensor("float32", floatData, [1, 3, 640, 640]);
+}
+
+// -------------------------------
+// AI LOOP
 // -------------------------------
 async function aiLoop() {
   if (!session || freezeActive) {
@@ -60,38 +83,21 @@ async function aiLoop() {
 
   const now = performance.now();
 
-  // Resize frame for inference
-  const tmpCanvas = document.createElement("canvas");
-  tmpCanvas.width = 640;
-  tmpCanvas.height = 640;
-  const tmpCtx = tmpCanvas.getContext("2d");
-  tmpCtx.drawImage(video, 0, 0, 640, 640);
-
-  const imageData = tmpCtx.getImageData(0, 0, 640, 640);
-  const inputTensor = new ort.Tensor("float32", imageData.data, [1, 640, 640, 4]);
-
+  const inputTensor = preprocessFrame();
   const feeds = { images: inputTensor };
+
   const results = await session.run(feeds);
   const detections = results.output.data;
 
-  // -------------------------------
-  // FILTER DETECTIONS
-  // -------------------------------
   const balls = detections.filter(d => d.confidence > MIN_CONFIDENCE);
   const hasBall = balls.length > 0;
 
-  // -------------------------------
-  // PERSISTENCE CHECK
-  // -------------------------------
   if (hasBall) {
     consecutiveBallFrames++;
   } else {
     consecutiveBallFrames = 0;
   }
 
-  // -------------------------------
-  // STRIKE LOGIC
-  // -------------------------------
   if (consecutiveBallFrames >= REQUIRED_FRAMES) {
     const timeSinceLastStrike = now - lastStrikeTime;
 
@@ -112,14 +118,9 @@ aiLoop();
 // STRIKE EVENT + FREEZE FRAME
 // -------------------------------
 function callStrike() {
-  console.log("STRIKE!");
-
   freezeActive = true;
 
-  // Save freeze frame for replay
   lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  // Draw freeze frame
   ctx.putImageData(lastStrikeFrame, 0, 0);
 
   setTimeout(() => {
@@ -141,7 +142,6 @@ function replayStrike() {
   }
 }
 
-// Attach replay button
 document.getElementById("replayButton").addEventListener("click", replayStrike);
 
 // -------------------------------
@@ -156,13 +156,12 @@ document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
 });
 
 // -------------------------------
-// VIDEO DRAW LOOP (always smooth)
+// VIDEO DRAW LOOP
 // -------------------------------
 function drawLoop() {
   if (!freezeActive) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Draw strike zone using slider scales
     const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
     const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
     const zoneX = (canvas.width - zoneWidth) / 2;
