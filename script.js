@@ -8,7 +8,7 @@ const FREEZE_MS = 3000;
 
 // performance tuning
 const INFERENCE_INTERVAL_MS = 250; // 4 FPS inference
-const MODEL_INPUT_SIZE = 320;      // 320x320 instead of 640x640
+const MODEL_INPUT_SIZE = 640;      // REQUIRED by your model
 
 let lastStrikeTime = 0;
 let consecutiveBallFrames = 0;
@@ -59,7 +59,7 @@ async function loadModel() {
 loadModel();
 
 // -------------------------------
-// IMAGE PREPROCESSING (320x320)
+// IMAGE PREPROCESSING (640x640)
 // -------------------------------
 function preprocessFrame() {
   const tmpCanvas = document.createElement("canvas");
@@ -105,7 +105,7 @@ async function aiLoop() {
   const outputKey = Object.keys(results)[0];
   const detectionsTensor = results[outputKey];
 
-  // TEMPORARY: until we see console output
+  // TEMPORARY until we see console output
   const detections = detectionsTensor.data || [];
   const balls = detections.filter(d => d.confidence > MIN_CONFIDENCE);
   const hasBall = balls.length > 0;
