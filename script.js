@@ -6,9 +6,8 @@ const REQUIRED_FRAMES = 3;
 const STRIKE_COOLDOWN = 2000;
 const FREEZE_MS = 3000;
 
-// performance tuning
-const INFERENCE_INTERVAL_MS = 250; // 4 FPS inference
-const MODEL_INPUT_SIZE = 640;      // REQUIRED by your model
+const INFERENCE_INTERVAL_MS = 250;
+const MODEL_INPUT_SIZE = 640;
 
 let lastStrikeTime = 0;
 let consecutiveBallFrames = 0;
@@ -39,11 +38,10 @@ async function setupCamera() {
   video.srcObject = stream;
   await video.play();
 }
-
 setupCamera();
 
 // -------------------------------
-// LOAD MODEL (WASM ONLY)
+// LOAD MODEL
 // -------------------------------
 let session;
 
@@ -55,11 +53,10 @@ async function loadModel() {
     executionProviders: ["wasm"]
   });
 }
-
 loadModel();
 
 // -------------------------------
-// IMAGE PREPROCESSING (640x640)
+// PREPROCESS
 // -------------------------------
 function preprocessFrame() {
   const tmpCanvas = document.createElement("canvas");
@@ -74,16 +71,44 @@ function preprocessFrame() {
   let idx = 0;
 
   for (let i = 0; i < data.length; i += 4) {
-    floatData[idx++] = data[i] / 255;     // R
-    floatData[idx++] = data[i + 1] / 255; // G
-    floatData[idx++] = data[i + 2] / 255; // B
+    floatData[idx++] = data[i] / 255;
+    floatData[idx++] = data[i + 1] / 255;
+    floatData[idx++] = data[i + 2] / 255;
   }
 
   return new ort.Tensor("float32", floatData, [1, 3, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
 }
 
 // -------------------------------
-// AI LOOP (slower, mobile-friendly)
+// YOLOv8 RAW OUTPUT DECODER
+// -------------------------------
+function decodeYOLO(rawData) {
+  const numValues = rawData.length;
+
+  // YOLOv8 output is usually [8400 * 84]
+  const numDetections = numValues / 84;
+
+  const detections = [];
+
+  for (let i = 0; i < numDetections; i++) {
+    const offset = i * 84;
+
+    const x = rawData[offset + 0];
+    const y = rawData[offset + 1];
+    const w = rawData[offset + 2];
+    const h = rawData[offset + 3];
+    const confidence = rawData[offset + 4];
+
+    if (confidence > MIN_CONFIDENCE) {
+      detections.push({ x, y, w, h, confidence });
+    }
+  }
+
+  return detections;
+}
+
+// -------------------------------
+// AI LOOP
 // -------------------------------
 async function aiLoop() {
   if (!session || freezeActive) {
@@ -98,17 +123,15 @@ async function aiLoop() {
 
   const results = await session.run(feeds);
 
-  // ⭐ ADDED SAFELY: this will show your model output format
-  console.log(results);
+  console.log(results); // keep for debugging
 
-  // AUTO-DETECT OUTPUT KEY
   const outputKey = Object.keys(results)[0];
-  const detectionsTensor = results[outputKey];
+  const rawTensor = results[outputKey];
 
-  // TEMPORARY until we see console output
-  const detections = detectionsTensor.data || [];
-  const balls = detections.filter(d => d.confidence > MIN_CONFIDENCE);
-  const hasBall = balls.length > 0;
+  const rawData = rawTensor.data;
+
+  const detections = decodeYOLO(rawData);
+  const hasBall = detections.length > 0;
 
   if (hasBall) {
     consecutiveBallFrames++;
@@ -129,11 +152,10 @@ async function aiLoop() {
 
   setTimeout(aiLoop, INFERENCE_INTERVAL_MS);
 }
-
 aiLoop();
 
 // -------------------------------
-// STRIKE EVENT + FREEZE FRAME
+// STRIKE EVENT
 // -------------------------------
 function callStrike() {
   freezeActive = true;
@@ -147,7 +169,7 @@ function callStrike() {
 }
 
 // -------------------------------
-// REPLAY LAST STRIKE
+// REPLAY
 // -------------------------------
 function replayStrike() {
   if (lastStrikeFrame) {
@@ -159,22 +181,20 @@ function replayStrike() {
     }, FREEZE_MS);
   }
 }
-
 document.getElementById("replayButton").addEventListener("click", replayStrike);
 
 // -------------------------------
-// STRIKE ZONE SLIDERS
+// SLIDERS
 // -------------------------------
 document.getElementById("zoneWidthSlider").addEventListener("input", (e) => {
   strikeZoneWidthScale = parseFloat(e.target.value);
 });
-
 document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
   strikeZoneHeightScale = parseFloat(e.target.value);
 });
 
 // -------------------------------
-// VIDEO DRAW LOOP (smooth UI)
+// DRAW LOOP
 // -------------------------------
 function drawLoop() {
   if (!freezeActive) {
@@ -192,5 +212,4 @@ function drawLoop() {
 
   requestAnimationFrame(drawLoop);
 }
-
 drawLoop();
