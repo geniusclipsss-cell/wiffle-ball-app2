@@ -1,31 +1,86 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Wiffleball Strike Caller</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css" />
-  <!-- ONNX Runtime Web -->
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <meta charset="UTF-8">
+  <title>Wiffle Strike Detector</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      color: white;
+    }
+
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+    }
+
+    #video {
+      display: none;
+    }
+
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 999;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 8px;
+    }
+
+    #controls label {
+      display: block;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    #controls input[type="range"] {
+      width: 150px;
+    }
+
+    #replayButton {
+      margin-bottom: 10px;
+      padding: 8px 12px;
+      font-size: 14px;
+      border: none;
+      border-radius: 6px;
+      background: #00aa00;
+      color: white;
+      cursor: pointer;
+    }
+  </style>
 </head>
+
 <body>
-  <div id="app">
-    <h1>Wiffleball Strike Caller</h1>
 
-    <div id="video-container">
-      <video id="video" autoplay playsinline></video>
-      <canvas id="canvas"></canvas>
-      <div id="strike-zone"></div>
-    </div>
+  <!-- Hidden video feed -->
+  <video id="video" autoplay playsinline></video>
 
-    <div id="controls">
-      <button id="start-btn">Start Camera</button>
-      <p id="status">Status: idle</p>
-      <p>Balls: <span id="balls-count">0</span></p>
-      <p>Strikes: <span id="strikes-count">0</span></p>
-    </div>
+  <!-- Canvas where everything is drawn -->
+  <canvas id="canvas"></canvas>
+
+  <!-- Controls: replay + sliders -->
+  <div id="controls">
+    <button id="replayButton">Replay Last Strike</button>
+
+    <label>Strike Zone Width</label>
+    <input type="range" id="zoneWidthSlider" min="0.5" max="2.0" step="0.05" value="1.0">
+
+    <label>Strike Zone Height</label>
+    <input type="range" id="zoneHeightSlider" min="0.5" max="2.0" step="0.05" value="1.0">
   </div>
 
+  <!-- Your script -->
   <script src="script.js"></script>
+
 </body>
 </html>
