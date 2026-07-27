@@ -62,13 +62,9 @@
 
 <body>
 
-  <!-- Hidden video feed -->
   <video id="video" autoplay playsinline></video>
-
-  <!-- Canvas where everything is drawn -->
   <canvas id="canvas"></canvas>
 
-  <!-- Controls: replay + sliders -->
   <div id="controls">
     <button id="replayButton">Replay Last Strike</button>
 
@@ -79,10 +75,10 @@
     <input type="range" id="zoneHeightSlider" min="0.5" max="2.0" step="0.05" value="1.0">
   </div>
 
-  <!-- ONNX Runtime Web -->
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <!-- Strike sound (baseball umpire call) -->
+  <audio id="strikeSound" src="strike.mp3"></audio>
 
-  <!-- Your script -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
   <script src="script.js"></script>
 
 </body>
