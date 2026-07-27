@@ -48,7 +48,7 @@ async function loadModel() {
 loadModel();
 
 // -------------------------------
-// IMAGE PREPROCESSING (FIXED)
+// IMAGE PREPROCESSING
 // -------------------------------
 function preprocessFrame() {
   const tmpCanvas = document.createElement("canvas");
@@ -59,14 +59,13 @@ function preprocessFrame() {
   tmpCtx.drawImage(video, 0, 0, 640, 640);
   const { data } = tmpCtx.getImageData(0, 0, 640, 640);
 
-  // Convert RGBA → normalized RGB float32 → NCHW
   const floatData = new Float32Array(1 * 3 * 640 * 640);
   let idx = 0;
 
   for (let i = 0; i < data.length; i += 4) {
-    floatData[idx++] = data[i] / 255;     // R
-    floatData[idx++] = data[i + 1] / 255; // G
-    floatData[idx++] = data[i + 2] / 255; // B
+    floatData[idx++] = data[i] / 255;
+    floatData[idx++] = data[i + 1] / 255;
+    floatData[idx++] = data[i + 2] / 255;
   }
 
   return new ort.Tensor("float32", floatData, [1, 3, 640, 640]);
@@ -87,7 +86,10 @@ async function aiLoop() {
   const feeds = { images: inputTensor };
 
   const results = await session.run(feeds);
-  const detections = results.output.data;
+
+  // AUTO-DETECT OUTPUT KEY
+  const outputKey = Object.keys(results)[0];
+  const detections = results[outputKey].data;
 
   const balls = detections.filter(d => d.confidence > MIN_CONFIDENCE);
   const hasBall = balls.length > 0;
