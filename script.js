@@ -33,13 +33,17 @@ async function setupCamera() {
 setupCamera();
 
 // -------------------------------
-// LOAD MODEL
+// LOAD MODEL (WebGL + WASM fallback)
 // -------------------------------
 let session;
 
 async function loadModel() {
+  // WASM performance boost
+  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.simd = true;
+
   session = await ort.InferenceSession.create("best_fp16.onnx", {
-    executionProviders: ["webgl"]
+    executionProviders: ["webgl", "wasm"]
   });
 }
 
