@@ -9,7 +9,7 @@ async function loadModel() {
     // Load WASM from local folder
     ort.env.wasm.wasmPaths = "./";
 
-    // Disable features that need extra helper files
+    // Disable features requiring missing files
     ort.env.wasm.simd = false;
     ort.env.wasm.proxy = false;
     ort.env.wasm.numThreads = 1;
@@ -19,16 +19,6 @@ async function loadModel() {
       executionProviders: ["wasm"]
     });
 
-    // Warm-up
-    const dummy = new Float32Array(1 * 3 * MODEL_INPUT_SIZE * MODEL_INPUT_SIZE);
-    const warm = new ort.Tensor("float32", dummy, [1, 3, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
-    const warmResults = await session.run({ images: warm });
-
-    const warmKey = Object.keys(warmResults)[0];
-    console.log("Warm-up output keys:", Object.keys(warmResults));
-    console.log("Warm-up output dims:", warmResults[warmKey].dims);
-    console.log("Warm-up first 20 values:", warmResults[warmKey].data.slice(0, 20));
-
     postMessage({ type: "ready" });
   } catch (err) {
     postMessage({ type: "error", error: err.message || String(err) });
@@ -36,14 +26,37 @@ async function loadModel() {
 }
 loadModel();
 
-// TEMP decode: just log raw output so we can see what the model is doing
-function decodeYOLO(rawData, dims) {
-  console.log("Model output dims:", dims);
-  console.log("First 50 raw values:", rawData.slice(0, 50));
 
-  // For now, return no detections until we understand the format
-  return [];
+// CORRECT DECODE FOR MODEL SHAPE [1, 5, 8400]
+function decodeYOLO(rawData, dims) {
+  const [batch, channels, count] = dims; // [1, 5, 8400]
+  const out = [];
+
+  for (let i = 0; i < count; i++) {
+    const x_center = rawData[i * 5 + 0];
+    const y_center = rawData[i * 5 + 1];
+    const w = rawData[i * 5 + 2];
+    const h = rawData[i * 5 + 3];
+    const conf = rawData[i * 5 + 4];
+
+    if (conf < 0.30) continue; // lower threshold for ball detection
+
+    // Convert pixel coords → normalized 0–1
+    const x = (x_center - w / 2) / MODEL_INPUT_SIZE;
+    const y = (y_center - h / 2) / MODEL_INPUT_SIZE;
+    const wn = w / MODEL_INPUT_SIZE;
+    const hn = h / MODEL_INPUT_SIZE;
+
+    // Sanity filters
+    if (wn <= 0 || hn <= 0) continue;
+    if (wn > 0.4 || hn > 0.4) continue; // ignore huge blobs
+
+    out.push({ x, y, w: wn, h: hn, confidence: conf });
+  }
+
+  return out;
 }
+
 
 onmessage = async (e) => {
   if (!session) return;
@@ -55,10 +68,7 @@ onmessage = async (e) => {
     const key = Object.keys(results)[0];
     const output = results[key];
 
-    const raw = output.data;
-    const dims = output.dims;
-
-    const detections = decodeYOLO(raw, dims);
+    const detections = decodeYOLO(output.data, output.dims);
 
     postMessage({ type: "detections", detections });
   } catch (err) {
