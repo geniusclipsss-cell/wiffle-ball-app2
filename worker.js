@@ -1,4 +1,3 @@
-// Load ONNX Runtime Web locally
 importScripts("ort.min.js");
 
 const MODEL_INPUT_SIZE = 640;
@@ -6,15 +5,11 @@ let session = null;
 
 async function loadModel() {
   try {
-    // Load WASM from local folder
     ort.env.wasm.wasmPaths = "./";
-
-    // Disable features requiring missing files
     ort.env.wasm.simd = false;
     ort.env.wasm.proxy = false;
     ort.env.wasm.numThreads = 1;
 
-    // Simple WASM backend
     session = await ort.InferenceSession.create("best_fp16.onnx", {
       executionProviders: ["wasm"]
     });
@@ -26,10 +21,8 @@ async function loadModel() {
 }
 loadModel();
 
-
-// CORRECT DECODE FOR MODEL SHAPE [1, 5, 8400]
 function decodeYOLO(rawData, dims) {
-  const [batch, channels, count] = dims; // [1, 5, 8400]
+  const [batch, channels, count] = dims;
   const out = [];
 
   for (let i = 0; i < count; i++) {
@@ -39,24 +32,27 @@ function decodeYOLO(rawData, dims) {
     const h = rawData[i * 5 + 3];
     const conf = rawData[i * 5 + 4];
 
-    if (conf < 0.30) continue; // lower threshold for ball detection
+    if (conf < 0.40) continue;
 
-    // Convert pixel coords → normalized 0–1
+    // Ball size sanity (wiffle ball is small)
+    if (w < 10 || h < 10) continue;        // too small = noise
+    if (w > 120 || h > 120) continue;      // too big = background
+
+    // Convert to normalized
     const x = (x_center - w / 2) / MODEL_INPUT_SIZE;
     const y = (y_center - h / 2) / MODEL_INPUT_SIZE;
     const wn = w / MODEL_INPUT_SIZE;
     const hn = h / MODEL_INPUT_SIZE;
 
-    // Sanity filters
+    // Position sanity
+    if (x < 0 || y < 0 || x > 1 || y > 1) continue;
     if (wn <= 0 || hn <= 0) continue;
-    if (wn > 0.4 || hn > 0.4) continue; // ignore huge blobs
 
     out.push({ x, y, w: wn, h: hn, confidence: conf });
   }
 
   return out;
 }
-
 
 onmessage = async (e) => {
   if (!session) return;
