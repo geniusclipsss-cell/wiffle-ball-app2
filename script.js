@@ -106,11 +106,14 @@ setInterval(() => {
   }
 }, 200);
 
-// Strike event
+// Strike event – capture the frame at the moment of strike
 function callStrike() {
   freezeActive = true;
 
+  // Draw current video frame to canvas, then capture it
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
   ctx.putImageData(lastStrikeFrame, 0, 0);
 
   if (strikeSound) {
@@ -153,6 +156,7 @@ function drawLoop() {
     ctx.lineWidth = 3;
     ctx.strokeRect(zoneX, zoneY, zoneWidth, zoneHeight);
 
+    // For now, detections will be empty until we implement correct decode
     for (const det of latestDetections) {
       const bx = det.x * canvas.width;
       const by = det.y * canvas.height;
