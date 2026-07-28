@@ -9,7 +9,7 @@ async function loadModel() {
     // Load WASM from local folder
     ort.env.wasm.wasmPaths = "./";
 
-    // Disable features that need extra files
+    // Disable features that need extra helper files
     ort.env.wasm.simd = false;
     ort.env.wasm.proxy = false;
     ort.env.wasm.numThreads = 1;
@@ -22,7 +22,12 @@ async function loadModel() {
     // Warm-up
     const dummy = new Float32Array(1 * 3 * MODEL_INPUT_SIZE * MODEL_INPUT_SIZE);
     const warm = new ort.Tensor("float32", dummy, [1, 3, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
-    await session.run({ images: warm });
+    const warmResults = await session.run({ images: warm });
+
+    const warmKey = Object.keys(warmResults)[0];
+    console.log("Warm-up output keys:", Object.keys(warmResults));
+    console.log("Warm-up output dims:", warmResults[warmKey].dims);
+    console.log("Warm-up first 20 values:", warmResults[warmKey].data.slice(0, 20));
 
     postMessage({ type: "ready" });
   } catch (err) {
@@ -31,30 +36,13 @@ async function loadModel() {
 }
 loadModel();
 
-function decodeYOLO(rawData) {
-  const numDetections = rawData.length / 84;
-  const out = [];
+// TEMP decode: just log raw output so we can see what the model is doing
+function decodeYOLO(rawData, dims) {
+  console.log("Model output dims:", dims);
+  console.log("First 50 raw values:", rawData.slice(0, 50));
 
-  for (let i = 0; i < numDetections; i++) {
-    const o = i * 84;
-
-    let x = rawData[o + 0] / MODEL_INPUT_SIZE;
-    let y = rawData[o + 1] / MODEL_INPUT_SIZE;
-    let w = rawData[o + 2] / MODEL_INPUT_SIZE;
-    let h = rawData[o + 3] / MODEL_INPUT_SIZE;
-    let conf = rawData[o + 4];
-
-    if (conf < 0.50) continue;
-    if (w > 0.5 || h > 0.5) continue;
-    if (w < 0.01 || h < 0.01) continue;
-
-    const ratio = w / h;
-    if (ratio < 0.5 || ratio > 1.8) continue;
-
-    out.push({ x, y, w, h, confidence: conf });
-  }
-
-  return out;
+  // For now, return no detections until we understand the format
+  return [];
 }
 
 onmessage = async (e) => {
@@ -65,9 +53,12 @@ onmessage = async (e) => {
     const results = await session.run({ images: tensor });
 
     const key = Object.keys(results)[0];
-    const raw = results[key].data;
+    const output = results[key];
 
-    const detections = decodeYOLO(raw);
+    const raw = output.data;
+    const dims = output.dims;
+
+    const detections = decodeYOLO(raw, dims);
 
     postMessage({ type: "detections", detections });
   } catch (err) {
