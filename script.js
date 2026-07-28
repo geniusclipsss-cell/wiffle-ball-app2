@@ -14,22 +14,25 @@ let consecutiveBallFrames = 0;
 let strikeZoneWidthScale = 1.0;
 let strikeZoneHeightScale = 1.0;
 
+// Start worker
 const worker = new Worker("worker.js");
 
-// Handle messages from worker
+// Worker message handler
 worker.onmessage = (e) => {
-  if (e.data.type === "ready") {
+  const msg = e.data;
+
+  if (msg.type === "ready") {
     console.log("Worker ready, model loaded.");
     return;
   }
 
-  if (e.data.type === "error") {
-    console.error("Worker error:", e.data.error);
+  if (msg.type === "error") {
+    console.error("Worker error:", msg.error);
     return;
   }
 
-  if (e.data.type === "detections") {
-    latestDetections = e.data.detections;
+  if (msg.type === "detections") {
+    latestDetections = msg.detections;
 
     if (latestDetections.length > 0) {
       consecutiveBallFrames++;
@@ -46,6 +49,7 @@ worker.onmessage = (e) => {
   }
 };
 
+// Camera setup
 async function setupCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
@@ -55,6 +59,7 @@ async function setupCamera() {
 }
 setupCamera();
 
+// Canvas resize
 function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -62,6 +67,7 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
+// Strike zone
 function getStrikeZone() {
   const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
   const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
@@ -70,6 +76,7 @@ function getStrikeZone() {
   return { zoneX, zoneY, zoneWidth, zoneHeight };
 }
 
+// Preprocess frame for ONNX
 function preprocessFrame() {
   const tmp = document.createElement("canvas");
   tmp.width = MODEL_INPUT_SIZE;
@@ -91,7 +98,7 @@ function preprocessFrame() {
   return out;
 }
 
-// AI loop → send frames to worker
+// Send frames to worker
 setInterval(() => {
   if (!freezeActive && video.readyState >= 2) {
     const frame = preprocessFrame();
@@ -116,7 +123,7 @@ function callStrike() {
   }, 3000);
 }
 
-// Replay
+// Replay button
 document.getElementById("replayButton").addEventListener("click", () => {
   if (lastStrikeFrame) {
     freezeActive = true;
