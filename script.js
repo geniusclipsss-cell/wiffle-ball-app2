@@ -14,7 +14,6 @@ let consecutiveBallFrames = 0;
 let strikeZoneWidthScale = 1.0;
 let strikeZoneHeightScale = 1.0;
 
-// Start worker
 const worker = new Worker("worker.js");
 
 worker.onmessage = (e) => {
@@ -31,6 +30,8 @@ worker.onmessage = (e) => {
   }
 
   if (msg.type === "detections") {
+    if (freezeActive) return;
+
     latestDetections = msg.detections;
 
     const { zoneX, zoneY, zoneWidth, zoneHeight } = getStrikeZone();
@@ -70,8 +71,6 @@ worker.onmessage = (e) => {
   }
 };
 
-
-// Camera setup
 async function setupCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
@@ -81,8 +80,6 @@ async function setupCamera() {
 }
 setupCamera();
 
-
-// Canvas resize
 function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -90,8 +87,6 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
-
-// Strike zone
 function getStrikeZone() {
   const zoneWidth = canvas.width * 0.3 * strikeZoneWidthScale;
   const zoneHeight = canvas.height * 0.5 * strikeZoneHeightScale;
@@ -100,8 +95,6 @@ function getStrikeZone() {
   return { zoneX, zoneY, zoneWidth, zoneHeight };
 }
 
-
-// Preprocess frame for ONNX
 function preprocessFrame() {
   const tmp = document.createElement("canvas");
   tmp.width = MODEL_INPUT_SIZE;
@@ -123,8 +116,6 @@ function preprocessFrame() {
   return out;
 }
 
-
-// Send frames to worker
 setInterval(() => {
   if (!freezeActive && video.readyState >= 2) {
     const frame = preprocessFrame();
@@ -132,8 +123,6 @@ setInterval(() => {
   }
 }, 200);
 
-
-// Strike event — freeze EXACT frame of detection
 function callStrike() {
   freezeActive = true;
 
@@ -141,6 +130,8 @@ function callStrike() {
   lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   ctx.putImageData(lastStrikeFrame, 0, 0);
+
+  latestDetections = []; // clear boxes
 
   strikeSound.currentTime = 0;
   strikeSound.play().catch(() => {});
@@ -150,8 +141,6 @@ function callStrike() {
   }, 3000);
 }
 
-
-// Replay button
 document.getElementById("replayButton").addEventListener("click", () => {
   if (lastStrikeFrame) {
     freezeActive = true;
@@ -162,8 +151,6 @@ document.getElementById("replayButton").addEventListener("click", () => {
   }
 });
 
-
-// Sliders
 document.getElementById("zoneWidthSlider").addEventListener("input", (e) => {
   strikeZoneWidthScale = parseFloat(e.target.value);
 });
@@ -171,8 +158,6 @@ document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
   strikeZoneHeightScale = parseFloat(e.target.value);
 });
 
-
-// Draw loop
 function drawLoop() {
   if (!freezeActive) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
