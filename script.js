@@ -16,7 +16,18 @@ let strikeZoneHeightScale = 1.0;
 
 const worker = new Worker("worker.js");
 
+// Handle messages from worker
 worker.onmessage = (e) => {
+  if (e.data.type === "ready") {
+    console.log("Worker ready, model loaded.");
+    return;
+  }
+
+  if (e.data.type === "error") {
+    console.error("Worker error:", e.data.error);
+    return;
+  }
+
   if (e.data.type === "detections") {
     latestDetections = e.data.detections;
 
