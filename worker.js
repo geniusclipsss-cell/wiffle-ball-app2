@@ -1,15 +1,20 @@
-// Load ONNX Runtime Web from CDN inside the worker
-importScripts("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.0/dist/ort-web.min.js");
+// Load ONNX Runtime Web locally
+importScripts("ort.min.js");
 
 const MODEL_INPUT_SIZE = 640;
 let session = null;
 
 async function loadModel() {
   try {
-    // Tell ORT where to find its WASM files (CDN)
-    ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.0/dist/";
+    // Load WASM from local folder
+    ort.env.wasm.wasmPaths = "./";
 
-    // Keep it simple: WASM backend, no WebGPU/WebGL
+    // Disable features that need extra files
+    ort.env.wasm.simd = false;
+    ort.env.wasm.proxy = false;
+    ort.env.wasm.numThreads = 1;
+
+    // Simple WASM backend
     session = await ort.InferenceSession.create("best_fp16.onnx", {
       executionProviders: ["wasm"]
     });
@@ -21,13 +26,11 @@ async function loadModel() {
 
     postMessage({ type: "ready" });
   } catch (err) {
-    // Send error back to main thread so you can see it in console
     postMessage({ type: "error", error: err.message || String(err) });
   }
 }
 loadModel();
 
-// YOLO decode (same as before)
 function decodeYOLO(rawData) {
   const numDetections = rawData.length / 84;
   const out = [];
