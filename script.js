@@ -17,7 +17,6 @@ let strikeZoneHeightScale = 1.0;
 // Start worker
 const worker = new Worker("worker.js");
 
-// Worker message handler
 worker.onmessage = (e) => {
   const msg = e.data;
 
@@ -34,20 +33,43 @@ worker.onmessage = (e) => {
   if (msg.type === "detections") {
     latestDetections = msg.detections;
 
-    if (latestDetections.length > 0) {
+    const { zoneX, zoneY, zoneWidth, zoneHeight } = getStrikeZone();
+
+    let ballInZone = false;
+
+    for (const det of latestDetections) {
+      const bx = det.x * canvas.width;
+      const by = det.y * canvas.height;
+      const bw = det.w * canvas.width;
+      const bh = det.h * canvas.height;
+
+      const intersectsZone =
+        bx < zoneX + zoneWidth &&
+        bx + bw > zoneX &&
+        by < zoneY + zoneHeight &&
+        by + bh > zoneY;
+
+      if (intersectsZone) {
+        ballInZone = true;
+        break;
+      }
+    }
+
+    if (ballInZone) {
       consecutiveBallFrames++;
     } else {
       consecutiveBallFrames = 0;
     }
 
     const now = performance.now();
-    if (consecutiveBallFrames >= 3 && now - lastStrikeTime > 2000) {
+    if (ballInZone && consecutiveBallFrames >= 3 && now - lastStrikeTime > 2000) {
       callStrike();
       lastStrikeTime = now;
       consecutiveBallFrames = 0;
     }
   }
 };
+
 
 // Camera setup
 async function setupCamera() {
@@ -59,6 +81,7 @@ async function setupCamera() {
 }
 setupCamera();
 
+
 // Canvas resize
 function resizeCanvas() {
   canvas.width = window.innerWidth;
@@ -66,6 +89,7 @@ function resizeCanvas() {
 }
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
+
 
 // Strike zone
 function getStrikeZone() {
@@ -75,6 +99,7 @@ function getStrikeZone() {
   const zoneY = (canvas.height - zoneHeight) / 2;
   return { zoneX, zoneY, zoneWidth, zoneHeight };
 }
+
 
 // Preprocess frame for ONNX
 function preprocessFrame() {
@@ -98,6 +123,7 @@ function preprocessFrame() {
   return out;
 }
 
+
 // Send frames to worker
 setInterval(() => {
   if (!freezeActive && video.readyState >= 2) {
@@ -106,25 +132,24 @@ setInterval(() => {
   }
 }, 200);
 
-// Strike event – capture the frame at the moment of strike
+
+// Strike event — freeze EXACT frame of detection
 function callStrike() {
   freezeActive = true;
 
-  // Draw current video frame to canvas, then capture it
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   lastStrikeFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   ctx.putImageData(lastStrikeFrame, 0, 0);
 
-  if (strikeSound) {
-    strikeSound.currentTime = 0;
-    strikeSound.play().catch(() => {});
-  }
+  strikeSound.currentTime = 0;
+  strikeSound.play().catch(() => {});
 
   setTimeout(() => {
     freezeActive = false;
   }, 3000);
 }
+
 
 // Replay button
 document.getElementById("replayButton").addEventListener("click", () => {
@@ -137,6 +162,7 @@ document.getElementById("replayButton").addEventListener("click", () => {
   }
 });
 
+
 // Sliders
 document.getElementById("zoneWidthSlider").addEventListener("input", (e) => {
   strikeZoneWidthScale = parseFloat(e.target.value);
@@ -144,6 +170,7 @@ document.getElementById("zoneWidthSlider").addEventListener("input", (e) => {
 document.getElementById("zoneHeightSlider").addEventListener("input", (e) => {
   strikeZoneHeightScale = parseFloat(e.target.value);
 });
+
 
 // Draw loop
 function drawLoop() {
@@ -156,7 +183,6 @@ function drawLoop() {
     ctx.lineWidth = 3;
     ctx.strokeRect(zoneX, zoneY, zoneWidth, zoneHeight);
 
-    // For now, detections will be empty until we implement correct decode
     for (const det of latestDetections) {
       const bx = det.x * canvas.width;
       const by = det.y * canvas.height;
